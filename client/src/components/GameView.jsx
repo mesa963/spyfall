@@ -34,6 +34,7 @@ export default function GameView({ room, myPlayer }) {
         players={room.players || []}
         myPlayer={myPlayer}
         isAccusationActive={room.state === 'accusation'}
+        accusation={room?.round?.accusation}
       />
 
       {/* Banner de Jugador Inicial para la primera pregunta */}

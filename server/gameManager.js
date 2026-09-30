@@ -326,8 +326,21 @@ export function startAccusation(roomCode, accuserSocketId, suspectSocketId) {
   const now = Date.now();
   const remainingMs = room.round.endTime ? Math.max(0, room.round.endTime - now) : null;
 
-  // Solo los jugadores activos (no eliminados) y distintos al sospechoso pueden votar
-  const activeVoters = room.players.filter(p => !p.isEliminated && p.id !== suspect.id).map(p => p.id);
+  // REGLA: "el otro impostor no deberia poder votar para salvar al impostor"
+  // Si el sospechoso es espía: solo los agentes inocentes activos pueden votar.
+  // Ningún compañero espía puede votar para salvar al sospechoso.
+  // Si el sospechoso es inocente: votan todos los jugadores activos no eliminados excepto el sospechoso.
+  let activeVoters;
+  if (suspect.isSpy) {
+    activeVoters = room.players.filter(p => !p.isEliminated && !p.isSpy).map(p => p.id);
+  } else {
+    activeVoters = room.players.filter(p => !p.isEliminated && p.id !== suspect.id).map(p => p.id);
+  }
+
+  const votes = {};
+  if (activeVoters.includes(accuser.id)) {
+    votes[accuser.id] = true; // El acusador vota sí automáticamente si está en activeVoters
+  }
 
   room.state = 'accusation';
   room.round.pausedRemainingMs = remainingMs;
@@ -338,10 +351,8 @@ export function startAccusation(roomCode, accuserSocketId, suspectSocketId) {
     suspectId: suspect.id,
     suspectName: suspect.name,
     suspectAvatar: suspect.avatar,
-    // Votos de los demás jugadores (excluye al sospechoso)
-    votes: {
-      [accuser.id]: true // El acusador vota sí automáticamente
-    },
+    isSuspectSpy: suspect.isSpy,
+    votes,
     requiredVoters: activeVoters
   };
 
@@ -360,6 +371,13 @@ export function castVote(roomCode, voterSocketId, voteBool) {
   }
 
   const accusation = room.round.accusation;
+  const suspect = room.players.find(p => p.id === accusation.suspectId);
+
+  // Bloqueo explícito: el otro impostor no puede votar para salvar al impostor
+  if (voter && voter.isSpy && suspect && suspect.isSpy) {
+    return { error: 'Los espías no pueden votar en acusaciones contra un compañero espía.' };
+  }
+
   if (!accusation.requiredVoters.includes(voterSocketId)) {
     return { error: 'No puedes votar en esta acusación.' };
   }
@@ -374,16 +392,19 @@ export function castVote(roomCode, voterSocketId, voteBool) {
     // Todos han votado: verificar resultado
     const yesVotes = Object.values(accusation.votes).filter(v => v === true).length;
     const noVotes = totalRequired - yesVotes;
-    // Para condenar en Spyfall, se requiere unanimidad de los votantes (todos excepto el acusado)
+    // Para condenar en Spyfall, se requiere unanimidad de los votantes habilitados
     const isUnanimous = yesVotes === totalRequired;
 
     if (isUnanimous) {
       // ¡Acusado condenado y eliminado!
-      const suspect = room.players.find(p => p.id === accusation.suspectId);
       const isSuspectSpy = suspect ? suspect.isSpy : false;
 
       if (isSuspectSpy) {
         // Los agentes atraparon al espía: ¡Fin de la partida y victoria de los agentes sobrevivientes!
+        // REGLA: "y siguen perdiendo los dos espias asi pierda uno"
+        const allSpies = room.players.filter(p => p.isSpy);
+        const spyNames = allSpies.map(p => p.name).join(' y ');
+
         room.round.lastVoteNotice = {
           suspectName: suspect ? suspect.name : accusation.suspectName,
           suspectAvatar: accusation.suspectAvatar,
@@ -393,12 +414,12 @@ export function castVote(roomCode, voterSocketId, voteBool) {
           noVotes,
           totalRequired,
           timestamp: Date.now(),
-          message: `🚨 ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) y ERA EL ESPÍA! Misión completada con éxito.`
+          message: `🚨 ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) y ERA EL ESPÍA! ${allSpies.length > 1 ? `Al caer un espía, ambos espías (${spyNames}) pierden la misión.` : ''} Misión completada con éxito.`
         };
 
         return endRound(room, {
           winner: 'innocents',
-          reason: `¡Agentes victoriosos! ${suspect ? suspect.name : 'El acusado'} fue eliminado por votación unánime y era el espía.`
+          reason: `¡Agentes victoriosos! ${suspect ? suspect.name : 'El acusado'} fue eliminado por votación unánime y era el espía.${allSpies.length > 1 ? ` ¡Ambos espías (${spyNames}) pierden la partida!` : ''}`
         });
       } else {
         // ¡El sospechoso era INOCENTE! Se elimina SOLO a ese jugador, los demás siguen jugando
@@ -412,7 +433,7 @@ export function castVote(roomCode, voterSocketId, voteBool) {
 
         // Si quedan 1 o 0 inocentes vivos, el espía gana porque ya no hay agentes suficientes para votar
         if (survivingInnocents.length <= 1) {
-          const spyNames = room.players.filter(p => p.isSpy).map(p => p.name).join(', ');
+          const spyNames = room.players.filter(p => p.isSpy).map(p => p.name).join(' y ');
           room.round.lastVoteNotice = {
             suspectName: suspect ? suspect.name : accusation.suspectName,
             suspectAvatar: accusation.suspectAvatar,
@@ -422,12 +443,12 @@ export function castVote(roomCode, voterSocketId, voteBool) {
             noVotes,
             totalRequired,
             timestamp: Date.now(),
-            message: `☠️ ¡${suspect ? suspect.name : 'El sospechoso'} era inocente y ha sido eliminado! Al no quedar agentes suficientes, ¡el espía (${spyNames}) gana la partida!`
+            message: `☠️ ¡${suspect ? suspect.name : 'El sospechoso'} era inocente y ha sido eliminado! Al no quedar agentes suficientes, ¡los espías (${spyNames}) ganan la partida!`
           };
 
           return endRound(room, {
             winner: 'spies',
-            reason: `¡Victoria del Espía! Los agentes se autoeliminaron por error y no quedaron suficientes para continuar. El verdadero espía era: ${spyNames}.`
+            reason: `¡Victoria de los Espías! Los agentes se autoeliminaron por error y no quedaron suficientes para continuar. Los espías eran: ${spyNames}.`
           });
         }
 
@@ -526,9 +547,11 @@ export function spyGuessLocation(roomCode, socketId, locationId) {
       guess: guessedLoc ? guessedLoc.name : locationId
     });
   } else {
+    const allSpies = room.players.filter(p => p.isSpy);
+    const spyNames = allSpies.map(p => p.name).join(' y ');
     return endRound(room, {
       winner: 'innocents',
-      reason: `¡El espía ${player.name} falló al adivinar! Creyó que era "${guessedLoc ? guessedLoc.name : locationId}", pero era "${actualLoc.name}".`,
+      reason: `¡El espía ${player.name} falló al adivinar! Creyó que era "${guessedLoc ? guessedLoc.name : locationId}", pero era "${actualLoc.name}".${allSpies.length > 1 ? ` ¡Ambos espías (${spyNames}) pierden la misión!` : ''}`,
       guess: guessedLoc ? guessedLoc.name : locationId
     });
   }
@@ -538,11 +561,12 @@ export function handleTimeExpired(roomCode) {
   const room = getRoom(roomCode);
   if (!room || room.state !== 'playing' || !room.round) return null;
 
-  // Si se acaba el tiempo y nadie descubrió al espía, el espía gana
-  const spyNames = room.players.filter(p => p.isSpy).map(p => p.name).join(', ');
+  // Si se acaba el tiempo y nadie descubrió al espía, los espías ganan
+  const allSpies = room.players.filter(p => p.isSpy);
+  const spyNames = allSpies.map(p => p.name).join(' y ');
   return endRound(room, {
     winner: 'spies',
-    reason: `¡Se agotó el tiempo de interrogatorio! El espía (${spyNames}) logró mantener su cobertura en secreto.`
+    reason: `¡Se agotó el tiempo de interrogatorio! ${allSpies.length > 1 ? `Los espías (${spyNames}) lograron` : `El espía (${spyNames}) logró`} mantener su cobertura en secreto.`
   });
 }
 
@@ -613,7 +637,17 @@ export function getCleanRoomData(room, recipientSocketId) {
       durationSeconds: room.round.durationSeconds,
       isUnlimited: room.round.isUnlimited,
       starterPlayer: room.round.starterPlayer,
-      accusation: room.round.accusation,
+      accusation: room.round.accusation ? {
+        accuserId: room.round.accusation.accuserId,
+        accuserName: room.round.accusation.accuserName,
+        suspectId: room.round.accusation.suspectId,
+        suspectName: room.round.accusation.suspectName,
+        suspectAvatar: room.round.accusation.suspectAvatar,
+        votes: room.round.accusation.votes,
+        requiredVoters: room.round.accusation.requiredVoters,
+        // Revelar si el sospechoso es espía solo si el receptor es espía o terminó la ronda
+        isSuspectSpy: (isGameOver || isSpy) ? room.round.accusation.isSuspectSpy : undefined
+      } : null,
       result: room.round.result,
       lastVoteNotice: room.round.lastVoteNotice,
       // Información de ubicación:
@@ -670,7 +704,14 @@ export function getCleanRoomData(room, recipientSocketId) {
       role: me.role,
       isSpy: me.isSpy,
       isEliminated: Boolean(me.isEliminated),
-      connected: me.connected
+      connected: me.connected,
+      fellowSpies: isSpy
+        ? room.players.filter(p => p.isSpy && p.id !== me.id).map(p => ({
+            id: p.id,
+            name: p.name,
+            avatar: p.avatar
+          }))
+        : []
     } : null,
     allLocations
   };

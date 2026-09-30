@@ -1,7 +1,7 @@
 import React, { useState } from 'react';
 import { Users, Crown, Wifi, WifiOff, CheckCircle2, Clock, AlertTriangle, ChevronDown, ChevronUp, Skull } from 'lucide-react';
 
-export default function PlayersStatusPanel({ players = [], myPlayer, isAccusationActive }) {
+export default function PlayersStatusPanel({ players = [], myPlayer, isAccusationActive, accusation }) {
   const [collapsed, setCollapsed] = useState(false);
 
   const activeCount = players.filter(p => !p.isEliminated && p.connected).length;
@@ -97,7 +97,11 @@ export default function PlayersStatusPanel({ players = [], myPlayer, isAccusatio
                           <AlertTriangle className="w-2.5 h-2.5" /> Acusado
                         </span>
                       ) : isAccusationActive ? (
-                        p.hasVoted ? (
+                        isMe && accusation?.requiredVoters && !accusation.requiredVoters.includes(p.id) ? (
+                          <span className="text-[10px] text-purple-400 flex items-center gap-1 font-mono">
+                            🚫 Bloqueado
+                          </span>
+                        ) : p.hasVoted ? (
                           <span className="text-[10px] text-emerald-400 flex items-center gap-1 font-mono">
                             <CheckCircle2 className="w-2.5 h-2.5" /> Voto listo
                           </span>

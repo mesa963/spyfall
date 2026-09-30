@@ -74,9 +74,23 @@ export default function SecretCard({ myPlayer, round, onOpenSpyGuess }) {
                 <h3 className="text-xl font-black text-rose-400 tracking-wide mb-1">
                   NO SABES LA UBICACIÓN
                 </h3>
-                <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed mb-4">
+                <p className="text-xs text-slate-300 max-w-sm mx-auto leading-relaxed mb-3">
                   Tu objetivo es disimular, escuchar atentamente las preguntas de los demás y deducir dónde están antes de que descubran quién eres.
                 </p>
+
+                {myPlayer?.fellowSpies?.length > 0 && (
+                  <div className="p-3 rounded-xl bg-purple-950/40 border border-purple-500/40 text-left mb-4 space-y-1.5 shadow-md">
+                    <div className="flex items-center gap-2 text-xs font-mono text-purple-300">
+                      <span>🤝 TU COMPAÑERO ESPÍA:</span>
+                      <span className="font-bold text-white">
+                        {myPlayer.fellowSpies.map(s => `${s.avatar} ${s.name}`).join(', ')}
+                      </span>
+                    </div>
+                    <p className="text-[11px] text-slate-300 leading-relaxed">
+                      ⚠️ <strong>Regla:</strong> Si descubren o eliminan a cualquiera de los dos, <strong>ambos espías pierden</strong>. Si acusan a tu compañero, <strong>no podrás votar para salvarlo</strong>.
+                    </p>
+                  </div>
+                )}
 
                 {onOpenSpyGuess && (
                   <button

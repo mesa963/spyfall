@@ -135,7 +135,13 @@ export default function VotingModal({
 
         <p className="text-xs text-slate-400 mt-1 mb-4">
           Acusación presentada por <strong className="text-slate-200">{accusation.accuserName}</strong>.
-          Se requiere <span className="text-rose-400 font-bold">unanimidad</span> de todos los agentes.
+          {accusation.isSuspectSpy && myPlayer?.isSpy ? (
+            <span className="text-rose-400 block font-semibold mt-1">
+              (Tu compañero espía fue acusado. No puedes votar).
+            </span>
+          ) : (
+            <> Se requiere <span className="text-rose-400 font-bold">unanimidad</span> de los agentes autorizados.</>
+          )}
         </p>
 
         {/* Progreso de la votación */}
@@ -178,6 +184,22 @@ export default function VotingModal({
         ) : isSuspect ? (
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs leading-relaxed">
             🚨 Has sido formalmente acusado. Los demás agentes están deliberando y votando en este momento.
+          </div>
+        ) : !accusation.requiredVoters.includes(myPlayer?.id) ? (
+          <div className="p-4 rounded-xl bg-purple-950/40 border border-purple-500/40 text-purple-200 text-xs leading-relaxed space-y-2">
+            <div className="font-bold flex items-center justify-center gap-1.5 text-purple-300 text-sm">
+              <span>🔒 Votación Bloqueada</span>
+            </div>
+            <p className="text-slate-300">
+              {myPlayer?.isSpy
+                ? 'Tu compañero espía ha sido acusado. Por reglas del juego, no puedes votar para salvarlo.'
+                : 'No estás habilitado para votar en esta acusación.'}
+            </p>
+            {myPlayer?.isSpy && (
+              <p className="text-rose-400 font-semibold text-[11px]">
+                ⚠️ Recuerda: si eliminan a tu compañero, ¡ambos espías pierden la partida!
+              </p>
+            )}
           </div>
         ) : hasVoted ? (
           <div className="p-4 rounded-xl bg-slate-800 border border-slate-700 text-slate-300 text-xs font-mono">
