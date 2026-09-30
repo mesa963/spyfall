@@ -7,7 +7,7 @@ const AVATARS = [
   '👠', '🦊', '🦉', '🐱', '🐺', '🦅', '🎯', '⚡'
 ];
 
-export default function Lobby({ onRoomJoined, initialCode = '' }) {
+export default function Lobby({ onRoomJoined, initialCode = '', sessionId }) {
   const [tab, setTab] = useState(initialCode ? 'join' : 'create');
   const [name, setName] = useState(localStorage.getItem('spyfall_player_name') || '');
   const [selectedAvatar, setSelectedAvatar] = useState(
@@ -45,7 +45,8 @@ export default function Lobby({ onRoomJoined, initialCode = '' }) {
     setLoading(true);
     socket.emit('create-room', {
       playerName: name.trim(),
-      avatar: selectedAvatar
+      avatar: selectedAvatar,
+      sessionId
     });
   };
 
@@ -64,7 +65,8 @@ export default function Lobby({ onRoomJoined, initialCode = '' }) {
     socket.emit('join-room', {
       roomCode: roomCode.trim().toUpperCase(),
       playerName: name.trim(),
-      avatar: selectedAvatar
+      avatar: selectedAvatar,
+      sessionId
     });
   };
 

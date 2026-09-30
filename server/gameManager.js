@@ -62,51 +62,132 @@ export function getRoomBySocketId(socketId) {
   return null;
 }
 
-export function joinRoom(roomCode, socketId, playerName, avatar) {
+// Actualiza las referencias del jugador cuando cambia de socketId al reconectarse
+function updatePlayerSocket(room, player, newSocketId) {
+  const oldSocketId = player.id;
+  player.id = newSocketId;
+  player.connected = true;
+  player.disconnectedAt = null;
+
+  if (room.hostId === oldSocketId) {
+    room.hostId = newSocketId;
+  }
+
+  if (room.round) {
+    if (Array.isArray(room.round.spyIds)) {
+      room.round.spyIds = room.round.spyIds.map(id => (id === oldSocketId ? newSocketId : id));
+    }
+    if (room.round.starterPlayer && room.round.starterPlayer.id === oldSocketId) {
+      room.round.starterPlayer.id = newSocketId;
+    }
+    if (room.round.accusation) {
+      const acc = room.round.accusation;
+      if (acc.accuserId === oldSocketId) acc.accuserId = newSocketId;
+      if (acc.suspectId === oldSocketId) acc.suspectId = newSocketId;
+      if (acc.requiredVoters) {
+        acc.requiredVoters = acc.requiredVoters.map(id => (id === oldSocketId ? newSocketId : id));
+      }
+      if (acc.votes && acc.votes[oldSocketId] !== undefined) {
+        acc.votes[newSocketId] = acc.votes[oldSocketId];
+        delete acc.votes[oldSocketId];
+      }
+    }
+  }
+}
+
+export function joinRoom(roomCode, socketId, sessionId, playerName, avatar) {
   const room = getRoom(roomCode);
   if (!room) {
     return { error: 'La sala especificada no existe.' };
   }
 
-  if (room.state !== 'lobby' && !room.players.some(p => p.id === socketId)) {
-    // Si ya comenzó la partida y no es un reconectado, permitir entrar como espectador o devolver error
-    return { error: 'La partida ya está en curso. Espera a que termine la ronda.' };
+  // 1. Verificar si este jugador ya estaba en la sala por su sessionId
+  if (sessionId) {
+    const existingPlayer = room.players.find(p => p.sessionId === sessionId);
+    if (existingPlayer) {
+      updatePlayerSocket(room, existingPlayer, socketId);
+      if (playerName) existingPlayer.name = playerName.trim().substring(0, 16);
+      if (avatar) existingPlayer.avatar = avatar;
+      return { room, player: existingPlayer, reconnected: true };
+    }
   }
 
-  // Comprobar si ya existe
-  let player = room.players.find(p => p.id === socketId);
-  if (!player) {
-    const defaultAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
-    player = {
-      id: socketId,
-      name: (playerName || `Agente ${room.players.length + 1}`).trim().substring(0, 16),
-      avatar: avatar || defaultAvatar,
-      isHost: room.players.length === 0,
-      score: 0,
-      role: null,
-      isSpy: false,
-      connected: true
-    };
-    room.players.push(player);
+  // 2. Si no es reconexión y la partida ya comenzó, no permitir unirse como nuevo
+  if (room.state !== 'lobby') {
+    return { error: 'La partida ya está en curso. Espera a que termine la ronda para unirte.' };
+  }
 
-    if (room.players.length === 1) {
-      room.hostId = socketId;
-      player.isHost = true;
-    }
-  } else {
-    player.connected = true;
-    if (playerName) player.name = playerName.trim().substring(0, 16);
-    if (avatar) player.avatar = avatar;
+  // 3. Crear nuevo jugador
+  const defaultAvatar = AVATARS[Math.floor(Math.random() * AVATARS.length)];
+  const isFirst = room.players.length === 0;
+
+  const player = {
+    id: socketId,
+    sessionId: sessionId || socketId,
+    name: (playerName || `Agente ${room.players.length + 1}`).trim().substring(0, 16),
+    avatar: avatar || defaultAvatar,
+    isHost: isFirst,
+    score: 0,
+    role: null,
+    isSpy: false,
+    connected: true,
+    disconnectedAt: null
+  };
+
+  room.players.push(player);
+
+  if (isFirst) {
+    room.hostId = socketId;
+    player.isHost = true;
+  }
+
+  return { room, player, reconnected: false };
+}
+
+// Reconexión silenciosa directa desde almacenamiento local
+export function reconnectSession(roomCode, socketId, sessionId) {
+  const room = getRoom(roomCode);
+  if (!room) return { error: 'La sala ya no está activa.' };
+
+  const player = room.players.find(p => p.sessionId === sessionId);
+  if (!player) return { error: 'No se encontró la sesión en esta sala.' };
+
+  updatePlayerSocket(room, player, socketId);
+  return { room, player };
+}
+
+// Maneja desconexión de socket SIN borrar al jugador (para proteger sesiones de móviles y recargas)
+export function handleSocketDisconnect(socketId) {
+  const room = getRoomBySocketId(socketId);
+  if (!room) return null;
+
+  const player = room.players.find(p => p.id === socketId);
+  if (!player) return null;
+
+  player.connected = false;
+  player.disconnectedAt = Date.now();
+
+  // Si todos los jugadores se han desconectado, programar limpieza de sala en 10 minutos
+  const anyConnected = room.players.some(p => p.connected);
+  if (!anyConnected) {
+    setTimeout(() => {
+      const currentRoom = rooms.get(room.code);
+      if (currentRoom && !currentRoom.players.some(p => p.connected)) {
+        rooms.delete(room.code);
+        console.log(`[Limpieza] Sala ${room.code} eliminada por inactividad prolongada.`);
+      }
+    }, 10 * 60 * 1000);
   }
 
   return { room, player };
 }
 
-export function leaveRoom(socketId) {
-  const room = getRoomBySocketId(socketId);
+// Salida voluntaria y explícita de la sala (botón "Salir de la sala")
+export function leaveRoomExplicit(socketId, sessionId) {
+  const room = getRoomBySocketId(socketId) || (sessionId ? Array.from(rooms.values()).find(r => r.players.some(p => p.sessionId === sessionId)) : null);
   if (!room) return null;
 
-  const playerIndex = room.players.findIndex(p => p.id === socketId);
+  const playerIndex = room.players.findIndex(p => p.id === socketId || (sessionId && p.sessionId === sessionId));
   if (playerIndex === -1) return null;
 
   const leavingPlayer = room.players[playerIndex];
@@ -118,13 +199,16 @@ export function leaveRoom(socketId) {
     return { roomCode: room.code, roomClosed: true };
   }
 
-  // Si el que se fue era el host, pasar el host al primer jugador restante
+  // Si el que se fue era el host, pasar el host al primer jugador restante conectado
   if (leavingPlayer.isHost) {
-    room.players[0].isHost = true;
-    room.hostId = room.players[0].id;
+    const nextHost = room.players.find(p => p.connected) || room.players[0];
+    if (nextHost) {
+      nextHost.isHost = true;
+      room.hostId = nextHost.id;
+    }
   }
 
-  // Si la partida estaba en curso y quedaron menos de 3 jugadores, cancelar partida
+  // Si la partida estaba en curso y quedaron menos de 3 jugadores, regresar a lobby
   if (room.state !== 'lobby' && room.players.length < 3) {
     room.state = 'lobby';
     room.round = null;
@@ -445,6 +529,7 @@ export function getCleanRoomData(room, recipientSocketId) {
   // Lista de jugadores: oculta si son espías a menos que haya terminado la ronda
   const cleanPlayers = room.players.map(p => ({
     id: p.id,
+    sessionId: p.sessionId,
     name: p.name,
     avatar: p.avatar,
     isHost: p.isHost,
@@ -472,12 +557,14 @@ export function getCleanRoomData(room, recipientSocketId) {
     round: clientRound,
     myPlayer: me ? {
       id: me.id,
+      sessionId: me.sessionId,
       name: me.name,
       avatar: me.avatar,
       isHost: me.isHost,
       score: me.score,
       role: me.role,
-      isSpy: me.isSpy
+      isSpy: me.isSpy,
+      connected: me.connected
     } : null,
     allLocations
   };

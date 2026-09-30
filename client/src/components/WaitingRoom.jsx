@@ -1,9 +1,9 @@
 import React, { useState } from 'react';
-import { Copy, Check, Share2, QrCode, Play, Crown, Clock, Users, X, AlertCircle } from 'lucide-react';
+import { Copy, Check, Share2, QrCode, Play, Crown, Clock, Users, X, AlertCircle, LogOut } from 'lucide-react';
 import { QRCodeSVG } from 'qrcode.react';
 import { socket } from '../services/socket';
 
-export default function WaitingRoom({ room, myPlayer }) {
+export default function WaitingRoom({ room, myPlayer, onLeaveRoom }) {
   const [copiedLink, setCopiedLink] = useState(false);
   const [showQr, setShowQr] = useState(false);
 
@@ -108,16 +108,21 @@ export default function WaitingRoom({ room, myPlayer }) {
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5">
             {room.players.map((p) => (
               <div
-                key={p.id}
+                key={p.sessionId || p.id}
                 className={`p-3 rounded-xl border flex items-center justify-between transition-all ${
-                  p.id === myPlayer?.id
-                    ? 'bg-slate-800/90 border-rose-500/40 shadow-sm'
-                    : 'bg-slate-900/60 border-slate-800'
+                  !p.connected
+                    ? 'opacity-60 bg-slate-950/80 border-dashed border-slate-700'
+                    : p.id === myPlayer?.id
+                      ? 'bg-slate-800/90 border-rose-500/40 shadow-sm'
+                      : 'bg-slate-900/60 border-slate-800'
                 }`}
               >
                 <div className="flex items-center gap-3">
-                  <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-xl">
+                  <div className="w-9 h-9 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-xl relative">
                     {p.avatar}
+                    {!p.connected && (
+                      <span className="absolute -bottom-1 -right-1 w-3 h-3 bg-amber-500 rounded-full border-2 border-slate-900 animate-pulse" title="Reconectando..." />
+                    )}
                   </div>
                   <div>
                     <div className="flex items-center gap-1.5">
@@ -125,6 +130,11 @@ export default function WaitingRoom({ room, myPlayer }) {
                       {p.id === myPlayer?.id && (
                         <span className="text-[10px] text-rose-400 bg-rose-500/10 px-1.5 py-0.2 rounded font-mono">
                           TÚ
+                        </span>
+                      )}
+                      {!p.connected && (
+                        <span className="text-[10px] text-amber-400 bg-amber-500/10 px-1.5 py-0.2 rounded font-mono">
+                          Reconectando...
                         </span>
                       )}
                     </div>
@@ -249,6 +259,19 @@ export default function WaitingRoom({ room, myPlayer }) {
           ) : (
             <div className="text-center py-3 px-4 rounded-xl bg-slate-900 border border-slate-800 text-slate-400 text-xs font-mono">
               Esperando a que el anfitrión inicie la partida...
+            </div>
+          )}
+
+          {onLeaveRoom && (
+            <div className="mt-4 text-center">
+              <button
+                type="button"
+                onClick={onLeaveRoom}
+                className="text-xs text-slate-500 hover:text-rose-400 flex items-center gap-1 mx-auto transition-colors font-mono"
+              >
+                <LogOut className="w-3.5 h-3.5" />
+                <span>Abandonar esta sala</span>
+              </button>
             </div>
           )}
         </div>

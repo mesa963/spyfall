@@ -8,7 +8,9 @@ import path from 'path';
 import {
   createRoom,
   joinRoom,
-  leaveRoom,
+  reconnectSession,
+  handleSocketDisconnect,
+  leaveRoomExplicit,
   updateSettings,
   startGame,
   startAccusation,
@@ -49,8 +51,10 @@ const io = new Server(httpServer, {
 function broadcastRoom(room) {
   if (!room) return;
   room.players.forEach(p => {
-    const cleanData = getCleanRoomData(room, p.id);
-    io.to(p.id).emit('game-update', cleanData);
+    if (p.connected && p.id) {
+      const cleanData = getCleanRoomData(room, p.id);
+      io.to(p.id).emit('game-update', cleanData);
+    }
   });
 }
 
@@ -58,38 +62,68 @@ io.on('connection', (socket) => {
   console.log(`[Socket] Conectado: ${socket.id}`);
 
   // Crear una nueva sala
-  socket.on('create-room', ({ playerName, avatar }) => {
+  socket.on('create-room', ({ playerName, avatar, sessionId }) => {
     const room = createRoom(socket.id);
-    const result = joinRoom(room.code, socket.id, playerName, avatar);
+    const result = joinRoom(room.code, socket.id, sessionId, playerName, avatar);
     if (result.error) {
       socket.emit('error-message', result.error);
       return;
     }
 
     socket.join(room.code);
-    socket.emit('room-joined', { roomCode: room.code, playerId: socket.id });
+    socket.emit('room-joined', { roomCode: room.code, playerId: socket.id, sessionId: result.player.sessionId });
     broadcastRoom(room);
     console.log(`[Sala] Creada ${room.code} por ${playerName} (${socket.id})`);
   });
 
   // Unirse a una sala existente
-  socket.on('join-room', ({ roomCode, playerName, avatar }) => {
+  socket.on('join-room', ({ roomCode, playerName, avatar, sessionId }) => {
     if (!roomCode) {
       socket.emit('error-message', 'El código de sala es requerido.');
       return;
     }
 
     const cleanCode = roomCode.toUpperCase().trim();
-    const result = joinRoom(cleanCode, socket.id, playerName, avatar);
+    const result = joinRoom(cleanCode, socket.id, sessionId, playerName, avatar);
     if (result.error) {
       socket.emit('error-message', result.error);
       return;
     }
 
     socket.join(result.room.code);
-    socket.emit('room-joined', { roomCode: result.room.code, playerId: socket.id });
+    socket.emit('room-joined', { roomCode: result.room.code, playerId: socket.id, sessionId: result.player.sessionId });
     broadcastRoom(result.room);
-    console.log(`[Sala] ${playerName} se unió a ${result.room.code}`);
+    console.log(`[Sala] ${playerName} entró a ${result.room.code} (Reconexión: ${result.reconnected})`);
+  });
+
+  // Intentar reconectar sesión guardada automáticamente
+  socket.on('reconnect-session', ({ roomCode, sessionId }) => {
+    if (!roomCode || !sessionId) {
+      socket.emit('reconnect-failed');
+      return;
+    }
+
+    const cleanCode = roomCode.toUpperCase().trim();
+    const result = reconnectSession(cleanCode, socket.id, sessionId);
+    if (result.error) {
+      socket.emit('reconnect-failed', result.error);
+      return;
+    }
+
+    socket.join(result.room.code);
+    socket.emit('room-joined', { roomCode: result.room.code, playerId: socket.id, sessionId: result.player.sessionId });
+    broadcastRoom(result.room);
+    console.log(`[Reconexión Exitosa] Agente ${result.player.name} recuperó su sesión en sala ${result.room.code}`);
+  });
+
+  // Salir explícitamente de la sala (botón "Salir")
+  socket.on('leave-room', ({ roomCode, sessionId }) => {
+    const result = leaveRoomExplicit(socket.id, sessionId);
+    socket.leave(roomCode);
+    socket.emit('left-room-success');
+    if (result && !result.roomClosed && result.room) {
+      broadcastRoom(result.room);
+    }
   });
 
   // Modificar configuraciones de partida
@@ -171,11 +205,11 @@ io.on('connection', (socket) => {
     broadcastRoom(result.room);
   });
 
-  // Desconexión
+  // Desconexión temporal (no destruye al jugador de inmediato para conservar la sesión)
   socket.on('disconnect', () => {
-    console.log(`[Socket] Desconectado: ${socket.id}`);
-    const result = leaveRoom(socket.id);
-    if (result && !result.roomClosed && result.room) {
+    console.log(`[Socket] Desconectado temporalmente: ${socket.id}`);
+    const result = handleSocketDisconnect(socket.id);
+    if (result && result.room) {
       broadcastRoom(result.room);
     }
   });

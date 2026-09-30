@@ -1,8 +1,8 @@
 import React from 'react';
-import { Volume2, VolumeX, HelpCircle, Shield, Copy, Check } from 'lucide-react';
+import { Volume2, VolumeX, HelpCircle, Shield, Copy, Check, LogOut } from 'lucide-react';
 import { sound } from '../services/sound';
 
-export default function Navbar({ roomCode, onOpenHelp }) {
+export default function Navbar({ roomCode, onOpenHelp, onLeaveRoom }) {
   const [muted, setMuted] = React.useState(sound.isMuted());
   const [copied, setCopied] = React.useState(false);
 
@@ -16,6 +16,12 @@ export default function Navbar({ roomCode, onOpenHelp }) {
     navigator.clipboard.writeText(roomCode);
     setCopied(true);
     setTimeout(() => setCopied(false), 2000);
+  };
+
+  const confirmLeave = () => {
+    if (window.confirm('¿Seguro que deseas salir de esta sala?')) {
+      onLeaveRoom();
+    }
   };
 
   return (
@@ -67,6 +73,17 @@ export default function Navbar({ roomCode, onOpenHelp }) {
           >
             {muted ? <VolumeX className="w-4 h-4 text-slate-400" /> : <Volume2 className="w-4 h-4 text-emerald-400" />}
           </button>
+
+          {onLeaveRoom && (
+            <button
+              onClick={confirmLeave}
+              title="Salir de la sala"
+              className="p-2 rounded-lg bg-rose-600/10 hover:bg-rose-600/20 border border-rose-500/30 text-rose-400 hover:text-rose-300 transition-all active:scale-95 flex items-center gap-1 text-xs"
+            >
+              <LogOut className="w-4 h-4" />
+              <span className="hidden sm:inline font-mono">Salir</span>
+            </button>
+          )}
         </div>
       </div>
     </header>
