@@ -2,26 +2,24 @@ FROM node:22-alpine
 
 WORKDIR /app
 
-# Copiar archivos de dependencias
-COPY package*.json ./
-COPY server/package*.json ./server/
-COPY client/package*.json ./client/
-
-# Instalar dependencias completas para build
-RUN npm run install:all
-
-# Copiar todo el código fuente
+# Copiar archivos del proyecto
 COPY . .
 
-# Compilar el cliente con Vite
+# 1. Instalar dependencias del servidor
+WORKDIR /app/server
+RUN npm install
+
+# 2. Instalar dependencias del cliente y compilar
+WORKDIR /app/client
+RUN npm install --include=dev
 RUN npm run build
 
-# Variables de entorno
+# 3. Volver al directorio raíz
+WORKDIR /app
+
 ENV PORT=3001
 ENV NODE_ENV=production
 
-# Render asigna el puerto automáticamente mediante la variable PORT
 EXPOSE 3001
 
-# Iniciar el servidor unificado
 CMD ["npm", "start"]
