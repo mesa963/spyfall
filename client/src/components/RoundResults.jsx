@@ -107,7 +107,7 @@ export default function RoundResults({ room, myPlayer }) {
                       {p.name} {p.id === myPlayer?.id && '(Tú)'}
                     </span>
                     <span className={`text-[11px] ${p.isSpy ? 'text-rose-400 font-bold' : 'text-slate-400'}`}>
-                      {p.isSpy ? '🕵️ Espía Secreto' : p.role}
+                      {p.isSpy ? '🕵️ Espía Secreto' : `${p.role} ${p.isEliminated ? '— ☠️ Eliminado' : '— 🛡️ Sobrevivió'}`}
                     </span>
                   </div>
                 </div>

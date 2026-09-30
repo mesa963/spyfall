@@ -267,6 +267,7 @@ export function startGame(roomCode, socketId) {
   const shuffledRoles = shuffleArray(chosenLocation.roles);
 
   room.players.forEach(player => {
+    player.isEliminated = false;
     if (spyIds.includes(player.id)) {
       player.isSpy = true;
       player.role = 'Espía Secreto';
@@ -318,10 +319,15 @@ export function startAccusation(roomCode, accuserSocketId, suspectSocketId) {
 
   if (!accuser || !suspect) return { error: 'Jugadores inválidos.' };
   if (accuser.id === suspect.id) return { error: 'No puedes acusarte a ti mismo.' };
+  if (accuser.isEliminated) return { error: 'Los agentes eliminados no pueden acusar.' };
+  if (suspect.isEliminated) return { error: 'Este jugador ya ha sido eliminado.' };
 
   // Pausar el tiempo de juego durante la acusación (si no es tiempo indefinido)
   const now = Date.now();
   const remainingMs = room.round.endTime ? Math.max(0, room.round.endTime - now) : null;
+
+  // Solo los jugadores activos (no eliminados) y distintos al sospechoso pueden votar
+  const activeVoters = room.players.filter(p => !p.isEliminated && p.id !== suspect.id).map(p => p.id);
 
   room.state = 'accusation';
   room.round.pausedRemainingMs = remainingMs;
@@ -336,7 +342,7 @@ export function startAccusation(roomCode, accuserSocketId, suspectSocketId) {
     votes: {
       [accuser.id]: true // El acusador vota sí automáticamente
     },
-    requiredVoters: room.players.filter(p => p.id !== suspect.id).map(p => p.id)
+    requiredVoters: activeVoters
   };
 
   return { room };
@@ -346,6 +352,11 @@ export function castVote(roomCode, voterSocketId, voteBool) {
   const room = getRoom(roomCode);
   if (!room || room.state !== 'accusation' || !room.round || !room.round.accusation) {
     return { error: 'No hay ninguna votación activa.' };
+  }
+
+  const voter = room.players.find(p => p.id === voterSocketId);
+  if (voter && voter.isEliminated) {
+    return { error: 'Los agentes eliminados no pueden votar.' };
   }
 
   const accusation = room.round.accusation;
@@ -371,33 +382,74 @@ export function castVote(roomCode, voterSocketId, voteBool) {
       const suspect = room.players.find(p => p.id === accusation.suspectId);
       const isSuspectSpy = suspect ? suspect.isSpy : false;
 
-      room.round.lastVoteNotice = {
-        suspectName: suspect ? suspect.name : accusation.suspectName,
-        suspectAvatar: accusation.suspectAvatar,
-        eliminated: true,
-        wasSpy: isSuspectSpy,
-        yesVotes,
-        noVotes,
-        totalRequired,
-        timestamp: Date.now(),
-        message: isSuspectSpy
-          ? `🚨 ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) y ERA EL ESPÍA! Misión completada con éxito.`
-          : `⚠️ ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) pero ERA INOCENTE! El espía triunfó.`
-      };
-
       if (isSuspectSpy) {
-        // Los agentes atraparon al espía
+        // Los agentes atraparon al espía: ¡Fin de la partida y victoria de los agentes sobrevivientes!
+        room.round.lastVoteNotice = {
+          suspectName: suspect ? suspect.name : accusation.suspectName,
+          suspectAvatar: accusation.suspectAvatar,
+          eliminated: true,
+          wasSpy: true,
+          yesVotes,
+          noVotes,
+          totalRequired,
+          timestamp: Date.now(),
+          message: `🚨 ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) y ERA EL ESPÍA! Misión completada con éxito.`
+        };
+
         return endRound(room, {
           winner: 'innocents',
           reason: `¡Agentes victoriosos! ${suspect ? suspect.name : 'El acusado'} fue eliminado por votación unánime y era el espía.`
         });
       } else {
-        // Acusaron a un inocente: ¡el espía gana!
-        const spyNames = room.players.filter(p => p.isSpy).map(p => p.name).join(', ');
-        return endRound(room, {
-          winner: 'spies',
-          reason: `¡Victoria del Espía! ${suspect ? suspect.name : 'El acusado'} era inocente. El verdadero espía era: ${spyNames}.`
-        });
+        // ¡El sospechoso era INOCENTE! Se elimina SOLO a ese jugador, los demás siguen jugando
+        if (suspect) {
+          suspect.isEliminated = true;
+        }
+
+        // Contar agentes inocentes vivos restantes
+        const survivingInnocents = room.players.filter(p => !p.isEliminated && !p.isSpy);
+        const survivingSpies = room.players.filter(p => !p.isEliminated && p.isSpy);
+
+        // Si quedan 1 o 0 inocentes vivos, el espía gana porque ya no hay agentes suficientes para votar
+        if (survivingInnocents.length <= 1) {
+          const spyNames = room.players.filter(p => p.isSpy).map(p => p.name).join(', ');
+          room.round.lastVoteNotice = {
+            suspectName: suspect ? suspect.name : accusation.suspectName,
+            suspectAvatar: accusation.suspectAvatar,
+            eliminated: true,
+            wasSpy: false,
+            yesVotes,
+            noVotes,
+            totalRequired,
+            timestamp: Date.now(),
+            message: `☠️ ¡${suspect ? suspect.name : 'El sospechoso'} era inocente y ha sido eliminado! Al no quedar agentes suficientes, ¡el espía (${spyNames}) gana la partida!`
+          };
+
+          return endRound(room, {
+            winner: 'spies',
+            reason: `¡Victoria del Espía! Los agentes se autoeliminaron por error y no quedaron suficientes para continuar. El verdadero espía era: ${spyNames}.`
+          });
+        }
+
+        // Si aún quedan 2 o más agentes inocentes vivos, ¡LA PARTIDA CONTINÚA PARA LOS SOBREVIVIENTES!
+        room.round.lastVoteNotice = {
+          suspectName: suspect ? suspect.name : accusation.suspectName,
+          suspectAvatar: accusation.suspectAvatar,
+          eliminated: true,
+          wasSpy: false,
+          yesVotes,
+          noVotes,
+          totalRequired,
+          timestamp: Date.now(),
+          message: `⚠️ ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO (${yesVotes}/${totalRequired}), pero ERA INOCENTE! Pasa a ser espectador. ¡Los agentes restantes siguen jugando para descubrir al espía!`
+        };
+
+        if (room.round.pausedRemainingMs) {
+          room.round.endTime = Date.now() + room.round.pausedRemainingMs;
+        }
+        room.round.accusation = null;
+        room.state = 'playing';
+        return { room, voteFailed: false, innocentEliminated: true };
       }
     } else {
       // La votación fracasó, NO fue eliminado
@@ -497,14 +549,14 @@ export function handleTimeExpired(roomCode) {
 function endRound(room, { winner, reason, guess = null }) {
   room.state = 'round_end';
 
-  // Asignar puntos
+  // Asignar puntos individuales: solo los agentes sobrevivientes no eliminados puntúan
   if (winner === 'spies') {
     room.players.forEach(p => {
       if (p.isSpy) p.score += 2;
     });
   } else {
     room.players.forEach(p => {
-      if (!p.isSpy) p.score += 1;
+      if (!p.isSpy && !p.isEliminated) p.score += 1;
     });
   }
 
@@ -537,6 +589,7 @@ export function restartGame(roomCode, socketId) {
   room.players.forEach(p => {
     p.role = null;
     p.isSpy = false;
+    p.isEliminated = false;
   });
 
   return { room };
@@ -586,6 +639,7 @@ export function getCleanRoomData(room, recipientSocketId) {
     isStarter: room.round?.starterPlayer?.id === p.id,
     hasVoted: room.round?.accusation?.votes ? room.round.accusation.votes[p.id] !== undefined : false,
     isAccused: room.round?.accusation?.suspectId === p.id,
+    isEliminated: Boolean(p.isEliminated),
     // Solo revela rol si es el propio jugador o si la ronda terminó
     role: (room.state === 'round_end' || p.id === recipientSocketId) ? p.role : null,
     isSpy: (room.state === 'round_end' || p.id === recipientSocketId) ? p.isSpy : null
@@ -615,6 +669,7 @@ export function getCleanRoomData(room, recipientSocketId) {
       score: me.score,
       role: me.role,
       isSpy: me.isSpy,
+      isEliminated: Boolean(me.isEliminated),
       connected: me.connected
     } : null,
     allLocations

@@ -17,9 +17,9 @@ export default function VotingModal({
 
   if (!isOpen && !isAccusationActive) return null;
 
-  // Si no hay acusación en marcha, mostrar lista para seleccionar a quién acusar
+  // Si no hay acusación en marcha, mostrar lista para seleccionar a quién acusar (solo agentes vivos)
   if (!isAccusationActive) {
-    const candidatePlayers = room.players.filter(p => p.id !== myPlayer?.id);
+    const candidatePlayers = room.players.filter(p => p.id !== myPlayer?.id && !p.isEliminated);
 
     const handleConfirmAccusation = () => {
       if (!selectedSuspectId) return;
@@ -171,7 +171,11 @@ export default function VotingModal({
         </div>
 
         {/* Acciones de votación */}
-        {isSuspect ? (
+        {myPlayer?.isEliminated ? (
+          <div className="p-4 rounded-xl bg-slate-800/80 border border-slate-700 text-slate-400 text-xs font-mono">
+            ☠️ Estás eliminado de la ronda. Como espectador, no participas en las votaciones.
+          </div>
+        ) : isSuspect ? (
           <div className="p-4 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-300 text-xs leading-relaxed">
             🚨 Has sido formalmente acusado. Los demás agentes están deliberando y votando en este momento.
           </div>

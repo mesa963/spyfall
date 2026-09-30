@@ -51,6 +51,19 @@ export default function GameView({ room, myPlayer }) {
         </div>
       )}
 
+      {/* Banner si el jugador actual fue eliminado */}
+      {myPlayer?.isEliminated && (
+        <div className="p-4 rounded-2xl bg-rose-950/80 border border-rose-500/60 shadow-xl flex items-center gap-3 text-rose-200">
+          <span className="text-2xl">☠️</span>
+          <div>
+            <h4 className="font-bold text-sm text-white">HAS SIDO ELIMINADO (MODO ESPECTADOR)</h4>
+            <p className="text-xs text-rose-300/90 leading-relaxed">
+              La votación te ha descartado. Los demás agentes siguen jugando de forma independiente para encontrar al verdadero espía. Guarda silencio para no dar pistas.
+            </p>
+          </div>
+        </div>
+      )}
+
       {/* Tarjeta de Identidad Secreta */}
       <SecretCard
         myPlayer={myPlayer}
@@ -60,15 +73,21 @@ export default function GameView({ room, myPlayer }) {
 
       {/* Botones de Acción Táctica */}
       <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-        <button
-          onClick={() => setShowAccusationModal(true)}
-          className="p-3.5 rounded-xl bg-slate-900 border border-rose-500/40 hover:border-rose-500 hover:bg-rose-950/20 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 group"
-        >
-          <AlertOctagon className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
-          <span>Acusar a un Sospechoso</span>
-        </button>
+        {!myPlayer?.isEliminated ? (
+          <button
+            onClick={() => setShowAccusationModal(true)}
+            className="p-3.5 rounded-xl bg-slate-900 border border-rose-500/40 hover:border-rose-500 hover:bg-rose-950/20 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-md active:scale-98 group"
+          >
+            <AlertOctagon className="w-4 h-4 text-rose-400 group-hover:scale-110 transition-transform" />
+            <span>Acusar a un Sospechoso</span>
+          </button>
+        ) : (
+          <div className="p-3.5 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-500 font-mono text-xs flex items-center justify-center gap-2">
+            <span>☠️ Eliminado de la ronda (Sin voto)</span>
+          </div>
+        )}
 
-        {isSpy ? (
+        {isSpy && !myPlayer?.isEliminated ? (
           <button
             onClick={() => setShowSpyGuessModal(true)}
             className="p-3.5 rounded-xl bg-gradient-to-r from-amber-600 to-rose-600 hover:from-amber-500 hover:to-rose-500 text-white font-bold text-xs uppercase tracking-wider flex items-center justify-center gap-2 transition-all shadow-lg shadow-amber-950/50 active:scale-98"
@@ -78,7 +97,7 @@ export default function GameView({ room, myPlayer }) {
           </button>
         ) : (
           <div className="p-3 rounded-xl bg-slate-900/60 border border-slate-800 text-slate-400 text-xs flex items-center justify-center gap-1.5 font-mono">
-            <span>🛡️ Mantén tu cobertura y detecta inconsistencias.</span>
+            <span>🛡️ Agentes independientes: cada quien busca sobrevivir.</span>
           </div>
         )}
       </div>
