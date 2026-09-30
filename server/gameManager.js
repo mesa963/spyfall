@@ -35,7 +35,7 @@ export function createRoom(hostSocketId) {
     createdAt: Date.now(),
     players: [],
     settings: {
-      roundDuration: 480, // 8 minutos por defecto (en segundos)
+      roundDuration: 0, // 0 = Tiempo Indefinido por defecto
       spyCount: 1,
       enableRoles: true
     },
@@ -224,7 +224,11 @@ export function updateSettings(roomCode, socketId, newSettings) {
   if (room.state !== 'lobby') return { error: 'No se puede modificar la configuración durante una ronda activa.' };
 
   if (typeof newSettings.roundDuration === 'number') {
-    room.settings.roundDuration = Math.max(60, Math.min(900, newSettings.roundDuration));
+    if (newSettings.roundDuration === 0) {
+      room.settings.roundDuration = 0;
+    } else {
+      room.settings.roundDuration = Math.max(60, Math.min(900, newSettings.roundDuration));
+    }
   }
   if (typeof newSettings.spyCount === 'number') {
     room.settings.spyCount = Math.max(1, Math.min(2, newSettings.spyCount));
@@ -279,7 +283,8 @@ export function startGame(roomCode, socketId) {
   const starter = room.players[Math.floor(Math.random() * room.players.length)];
 
   const now = Date.now();
-  const endTime = now + room.settings.roundDuration * 1000;
+  const isUnlimited = room.settings.roundDuration === 0;
+  const endTime = isUnlimited ? null : now + room.settings.roundDuration * 1000;
 
   room.state = 'playing';
   room.round = {
@@ -292,9 +297,11 @@ export function startGame(roomCode, socketId) {
     startTime: now,
     endTime,
     durationSeconds: room.settings.roundDuration,
+    isUnlimited,
     accusation: null,
     spyGuess: null,
-    result: null
+    result: null,
+    lastVoteNotice: null
   };
 
   return { room };
@@ -312,12 +319,13 @@ export function startAccusation(roomCode, accuserSocketId, suspectSocketId) {
   if (!accuser || !suspect) return { error: 'Jugadores inválidos.' };
   if (accuser.id === suspect.id) return { error: 'No puedes acusarte a ti mismo.' };
 
-  // Pausar el tiempo de juego durante la acusación
+  // Pausar el tiempo de juego durante la acusación (si no es tiempo indefinido)
   const now = Date.now();
-  const remainingMs = Math.max(0, room.round.endTime - now);
+  const remainingMs = room.round.endTime ? Math.max(0, room.round.endTime - now) : null;
 
   room.state = 'accusation';
   room.round.pausedRemainingMs = remainingMs;
+  room.round.lastVoteNotice = null; // Limpiar avisos anteriores
   room.round.accusation = {
     accuserId: accuser.id,
     accuserName: accuser.name,
@@ -354,17 +362,34 @@ export function castVote(roomCode, voterSocketId, voteBool) {
   if (votedCount >= totalRequired) {
     // Todos han votado: verificar resultado
     const yesVotes = Object.values(accusation.votes).filter(v => v === true).length;
+    const noVotes = totalRequired - yesVotes;
     // Para condenar en Spyfall, se requiere unanimidad de los votantes (todos excepto el acusado)
     const isUnanimous = yesVotes === totalRequired;
 
     if (isUnanimous) {
-      // ¡Acusado condenado!
+      // ¡Acusado condenado y eliminado!
       const suspect = room.players.find(p => p.id === accusation.suspectId);
-      if (suspect && suspect.isSpy) {
+      const isSuspectSpy = suspect ? suspect.isSpy : false;
+
+      room.round.lastVoteNotice = {
+        suspectName: suspect ? suspect.name : accusation.suspectName,
+        suspectAvatar: accusation.suspectAvatar,
+        eliminated: true,
+        wasSpy: isSuspectSpy,
+        yesVotes,
+        noVotes,
+        totalRequired,
+        timestamp: Date.now(),
+        message: isSuspectSpy
+          ? `🚨 ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) y ERA EL ESPÍA! Misión completada con éxito.`
+          : `⚠️ ¡${suspect ? suspect.name : 'El sospechoso'} FUE ELIMINADO por decisión unánime (${yesVotes}/${totalRequired}) pero ERA INOCENTE! El espía triunfó.`
+      };
+
+      if (isSuspectSpy) {
         // Los agentes atraparon al espía
         return endRound(room, {
           winner: 'innocents',
-          reason: `¡Agentes victoriosos! ${suspect.name} era el espía y fue descubierto por unanimidad.`
+          reason: `¡Agentes victoriosos! ${suspect ? suspect.name : 'El acusado'} fue eliminado por votación unánime y era el espía.`
         });
       } else {
         // Acusaron a un inocente: ¡el espía gana!
@@ -375,9 +400,22 @@ export function castVote(roomCode, voterSocketId, voteBool) {
         });
       }
     } else {
-      // La votación fracasó, la partida continúa
-      const pausedRemainingMs = room.round.pausedRemainingMs || 30000;
-      room.round.endTime = Date.now() + pausedRemainingMs;
+      // La votación fracasó, NO fue eliminado
+      room.round.lastVoteNotice = {
+        suspectName: accusation.suspectName,
+        suspectAvatar: accusation.suspectAvatar,
+        eliminated: false,
+        wasSpy: null,
+        yesVotes,
+        noVotes,
+        totalRequired,
+        timestamp: Date.now(),
+        message: `🛡️ Votación terminada: ${accusation.suspectName} NO FUE ELIMINADO (${yesVotes} votos a favor, ${noVotes} en contra. Se requería unanimidad). La misión continúa.`
+      };
+
+      if (room.round.pausedRemainingMs) {
+        room.round.endTime = Date.now() + room.round.pausedRemainingMs;
+      }
       room.round.accusation = null;
       room.state = 'playing';
       return { room, voteFailed: true, yesVotes, totalRequired };
@@ -397,8 +435,16 @@ export function cancelAccusation(roomCode, socketId) {
     return { error: 'Solo el acusador o el anfitrión pueden retirar la acusación.' };
   }
 
-  const pausedRemainingMs = room.round.pausedRemainingMs || 30000;
-  room.round.endTime = Date.now() + pausedRemainingMs;
+  room.round.lastVoteNotice = {
+    suspectName: room.round.accusation.suspectName,
+    eliminated: false,
+    timestamp: Date.now(),
+    message: `ℹ️ La acusación contra ${room.round.accusation.suspectName} fue cancelada. La misión continúa.`
+  };
+
+  if (room.round.pausedRemainingMs) {
+    room.round.endTime = Date.now() + room.round.pausedRemainingMs;
+  }
   room.round.accusation = null;
   room.state = 'playing';
 
@@ -512,9 +558,11 @@ export function getCleanRoomData(room, recipientSocketId) {
       startTime: room.round.startTime,
       endTime: room.round.endTime,
       durationSeconds: room.round.durationSeconds,
+      isUnlimited: room.round.isUnlimited,
       starterPlayer: room.round.starterPlayer,
       accusation: room.round.accusation,
       result: room.round.result,
+      lastVoteNotice: room.round.lastVoteNotice,
       // Información de ubicación:
       location: (isGameOver || !isSpy)
         ? {
@@ -535,6 +583,9 @@ export function getCleanRoomData(room, recipientSocketId) {
     isHost: p.isHost,
     score: p.score,
     connected: p.connected,
+    isStarter: room.round?.starterPlayer?.id === p.id,
+    hasVoted: room.round?.accusation?.votes ? room.round.accusation.votes[p.id] !== undefined : false,
+    isAccused: room.round?.accusation?.suspectId === p.id,
     // Solo revela rol si es el propio jugador o si la ronda terminó
     role: (room.state === 'round_end' || p.id === recipientSocketId) ? p.role : null,
     isSpy: (room.state === 'round_end' || p.id === recipientSocketId) ? p.isSpy : null

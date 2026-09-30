@@ -173,15 +173,18 @@ export default function WaitingRoom({ room, myPlayer, onLeaveRoom }) {
                   onChange={handleDurationChange}
                   className="w-full bg-slate-800 border border-slate-700 text-white rounded-lg px-2.5 py-1.5 text-xs font-medium focus:outline-none focus:border-rose-500"
                 >
+                  <option value={0}>♾️ Indefinido (Sin límite de tiempo)</option>
                   <option value={300}>5 minutos</option>
                   <option value={360}>6 minutos</option>
                   <option value={420}>7 minutos</option>
-                  <option value={480}>8 minutos (Recomendado)</option>
+                  <option value={480}>8 minutos</option>
                   <option value={600}>10 minutos</option>
                 </select>
               ) : (
-                <span className="text-xs font-bold text-white">
-                  {Math.floor(room.settings.roundDuration / 60)} minutos
+                <span className="text-xs font-bold text-white flex items-center gap-1">
+                  {room.settings.roundDuration === 0
+                    ? '♾️ Indefinido (Sin límite)'
+                    : `${Math.floor(room.settings.roundDuration / 60)} minutos`}
                 </span>
               )}
             </div>

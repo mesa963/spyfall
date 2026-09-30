@@ -5,6 +5,8 @@ import SecretCard from './SecretCard';
 import LocationsGrid from './LocationsGrid';
 import VotingModal from './VotingModal';
 import SpyGuessModal from './SpyGuessModal';
+import PlayersStatusPanel from './PlayersStatusPanel';
+import VoteNoticeBanner from './VoteNoticeBanner';
 
 export default function GameView({ room, myPlayer }) {
   const [showAccusationModal, setShowAccusationModal] = useState(false);
@@ -14,12 +16,24 @@ export default function GameView({ room, myPlayer }) {
   const isSpy = myPlayer?.isSpy;
 
   return (
-    <div className="max-w-4xl mx-auto my-4 px-4 space-y-5 animate-fadeIn">
-      {/* Barra de tiempo y estado */}
+    <div className="max-w-4xl mx-auto my-4 px-4 space-y-4 animate-fadeIn">
+      {/* Aviso de resultado de la votación (Si eliminaron o no a la persona) */}
+      {round?.lastVoteNotice && (
+        <VoteNoticeBanner notice={round.lastVoteNotice} />
+      )}
+
+      {/* Barra de tiempo y estado (Soporta tiempo indefinido y cuenta regresiva) */}
       <TimerBar
         round={round}
         roomCode={room.code}
         state={room.state}
+      />
+
+      {/* Panel con el estado detallado de todos los agentes */}
+      <PlayersStatusPanel
+        players={room.players || []}
+        myPlayer={myPlayer}
+        isAccusationActive={room.state === 'accusation'}
       />
 
       {/* Banner de Jugador Inicial para la primera pregunta */}

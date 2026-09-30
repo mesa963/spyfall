@@ -139,18 +139,34 @@ export default function VotingModal({
         </p>
 
         {/* Progreso de la votación */}
-        <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 mb-6">
+        <div className="p-3 rounded-xl bg-slate-950 border border-slate-800 mb-4">
           <div className="flex items-center justify-between text-xs text-slate-400 mb-2">
             <span className="flex items-center gap-1.5 font-mono">
               <Users className="w-3.5 h-3.5 text-cyan-400" />
               <span>Votos emitidos: {votesCount} / {totalRequired}</span>
             </span>
           </div>
-          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden">
+          <div className="w-full h-2 bg-slate-800 rounded-full overflow-hidden mb-3">
             <div
               className="h-full bg-rose-500 transition-all duration-300 rounded-full"
               style={{ width: `${(votesCount / totalRequired) * 100}%` }}
             />
+          </div>
+
+          {/* Estado de cada votante */}
+          <div className="grid grid-cols-2 gap-1.5 text-left max-h-32 overflow-y-auto">
+            {accusation.requiredVoters.map((voterId) => {
+              const voter = room.players.find(p => p.id === voterId);
+              const didVote = accusation.votes[voterId] !== undefined;
+              return (
+                <div key={voterId} className="px-2 py-1 rounded-lg bg-slate-900 border border-slate-800 text-[11px] flex items-center justify-between">
+                  <span className="truncate text-slate-300 font-medium">{voter ? voter.name : 'Agente'}</span>
+                  <span className={`font-mono text-[10px] ${didVote ? 'text-emerald-400 font-bold' : 'text-slate-500'}`}>
+                    {didVote ? '✓ Votó' : '⏳ Esperando'}
+                  </span>
+                </div>
+              );
+            })}
           </div>
         </div>
 
